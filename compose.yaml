@@ -1,18 +1,29 @@
 services:
-  app:
+  copy:
+    container_name: copy
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: app
+      dockerfile: docker/copy/Dockerfile
     ports:
       - "8080:8080"
+    environment:
+      - GIN_MODE=debug
     develop:
       watch:
         - action: rebuild
-          path: ./go.mod
-        - action: rebuild
-          path: ./go.sum
-        - action: rebuild
-          path: ./main.go
+          path: ./server
+  multistage:
+    container_name: multistage
+    build:
+      context: .
+      dockerfile: docker/multistage/Dockerfile
+    ports:
+      - "8888:8080"
     environment:
       - GIN_MODE=debug
+    develop:
+      watch:
+        - action: rebuild
+          path: go.mod
+        - action: rebuild
+          path: main.go

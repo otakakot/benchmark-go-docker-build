@@ -1,0 +1,10 @@
+# editor / OS
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go
+/vendor/
+
+server
