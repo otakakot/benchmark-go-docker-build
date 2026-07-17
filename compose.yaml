@@ -12,6 +12,21 @@ services:
       watch:
         - action: rebuild
           path: ./server
+  copy-build:
+    container_name: copy-build
+    build:
+      context: .
+      dockerfile: docker/copy/Dockerfile.dev
+    volumes:
+      - .:/app
+    develop:
+      watch:
+        - action: rebuild
+          path: go.mod
+        - action: rebuild
+          path: go.sum
+        - action: rebuild
+          path: main.go
   multistage:
     container_name: multistage
     build:
