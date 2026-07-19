@@ -54,7 +54,7 @@ jobs:
           provenance: true
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: success()
+        if: success() && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cache/go-build
@@ -65,14 +65,40 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
       - name: Set up Docker Buildx
+        id: setup-buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Restore Docker cache mounts
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: docker-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+          restore-keys: |
+            docker-${{ steps.setup-go.outputs.go-version }}-
+            docker-
+
+      - name: Inject Docker cache mounts
+        uses: reproducible-containers/buildkit-cache-dance@2925f5cfd92896e0f5a155899ff2ed2922b575c6 # v3.4.0
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-dir: cache-mount
+          dockerfile: docker/multistage/Dockerfile
+          skip-extraction: true
 
       - name: Build Docker image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -82,3 +108,20 @@ jobs:
           push: false
           sbom: true
           provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Docker cache mounts
+        if: success() && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          node "${GITHUB_WORKSPACE}/../_actions/reproducible-containers/buildkit-cache-dance/2925f5cfd92896e0f5a155899ff2ed2922b575c6/dist/index.js" \
+            --extract \
+            --cache-dir cache-mount \
+            --dockerfile docker/multistage/Dockerfile
+
+      - name: Save Docker cache mounts
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: cache-mount
+          key: ${{ steps.cache.outputs.cache-primary-key }}
