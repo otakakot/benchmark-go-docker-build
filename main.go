@@ -17,6 +17,10 @@ func main() {
 		ctx.JSON(http.StatusOK, "ok")
 	})
 
+	engine.GET("/ping", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, "pong")
+	})
+
 	if err := engine.Run(); err != nil {
 		panic(err)
 	}
