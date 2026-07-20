@@ -39,6 +39,9 @@ jobs:
             go-${{ steps.setup-go.outputs.go-version }}-
             go-
 
+      - name: Download Go modules
+        run: go mod download -x
+
       - name: Build Go binary on host
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s" -trimpath -o server .
 
