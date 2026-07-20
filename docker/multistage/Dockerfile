@@ -5,13 +5,13 @@ FROM golang:1.26.5 AS build
 
 WORKDIR /app
 
-RUN --mount=type=cache,target=/go/pkg/mod/,sharing=locked \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod/,sharing=locked \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
     go mod download -x
 
-RUN --mount=type=cache,target=/go/pkg/mod/ \
-    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod/,sharing=locked \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=bind,target=. \
     CGO_ENABLED=0 go build -ldflags="-s" -trimpath -o /bin/server .
 
