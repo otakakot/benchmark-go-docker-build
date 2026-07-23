@@ -1,276 +1,259 @@
-# Go Docker Build 戦略比較レポート
+# Go Docker Build 戦略比較レポート（最終版）
 
-## 実行結果サマリ
+## 検証条件
 
-### ジョブ合計時間（全3回の平均）
+- **4 戦略** を同一ワークフロー内で並列実行
+- **12 回** の実行（3条件 × 3-6回）
+- ランナー: ubuntu-latest（24.04）
 
-| 戦略 | Run 1 (cold) | Run 2 (warm) | Run 3 (warm) | 平均 |
+### 比較した 4 戦略
+
+| # | 戦略 | Dockerfile | キャッシュ機構 |
+|---|---|---|---|
+| 1 | **copy-build** | `docker/copy/Dockerfile`（FROM distroless + COPY） | Go バイナリをホスト上でビルドし、Docker は COPY のみ。Go ビルドキャッシュは `actions/cache` で管理 |
+| 2 | **multistage-build** | `docker/multistage/Dockerfile`（FROM golang AS build + go build） | なし。`--mount=type=cache` で同一ジョブ内のキャッシュのみ有効 |
+| 3 | **multistage-build-cache** | 同上 | `cache-from/ cache-to: type=gha,mode=max` で Docker レイヤーを GHA cache に保存 |
+| 4 | **multistage-build-cache-dance** | 同上 | 上記 + `buildkit-cache-dance` で `--mount=type=cache` の中身も GHA cache で永続化 |
+
+### 実行条件
+
+| 条件 | branch | 変更内容 | 実行回数 | Run ID |
 |---|---|---|---|---|
-| **copy-build** | **55s 🥇** | 65s 🥇 | **56s 🥈** | **58.7s 🥇** |
-| **multistage-build** | 64s 🥈 | **65s 🥇** | **54s 🥇** | **61.0s 🥇** |
-| multistage-build-cache | 102s | 72s | 74s | 82.7s |
-| multistage-build-cache-dance | 137s | 110s | 101s | 116.0s |
+| A. main（初回 warm up） | main | なし | Run1-6（6回） | [30013709780](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30013709780) 他 |
+| B. feature branch（main.go のみ変更） | api1, api2, api3 | main.go に API 追加 | Run7-9（3回） | [30019573820](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019573820) 他 |
+| C. go.mod 変更 | mod1, mod2, mod3 | 依存モジュール追加 | Run10-12（3回） | [30020153217](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30020153217) 他 |
 
-### Docker Build ステップ所要時間（内訳）
+### 実行結果の取得元
 
-| 戦略 | Run 1 (cold) | Run 2 | Run 3 |
+表記されている所要時間は、各 GitHub Actions ジョブの `startedAt` から `completedAt` までの wall-clock 時間（秒）です。
+
+| Run | 条件 | branch | Run ID |
 |---|---|---|---|
-| **copy-build** (Go build on host) | 27s | 34s | 28s |
-| **copy-build** (Docker COPY) | 6s | 7s | 7s |
-| **multistage-build** (Docker build) | 47s | 45s | 42s |
-| **multistage-build-cache** (Docker build) | 84s | 59s | 60s |
-| **multistage-build-cache-dance** (Docker build) | 76s | 63s | 56s |
+| Run1 | A. main | main | [30013709780](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30013709780) |
+| Run2 | A. main | main | [30016631157](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30016631157) |
+| Run3 | A. main | main | [30017114766](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30017114766) |
+| Run4 | A. main | main | [30018995893](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30018995893) |
+| Run5 | A. main | main | [30019124060](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019124060) |
+| Run6 | A. main | main | [30019362434](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019362434) |
+| Run7 | B. feature branch | api1 | [30019573820](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019573820) |
+| Run8 | B. feature branch | api2 | [30019732312](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019732312) |
+| Run9 | B. feature branch | api3 | [30019883881](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30019883881) |
+| Run10 | C. go.mod 変更 | mod1 | [30020153217](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30020153217) |
+| Run11 | C. go.mod 変更 | mod2 | [30020426769](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30020426769) |
+| Run12 | C. go.mod 変更 | mod3 | [30020636276](https://github.com/otakakot/benchmark-go-docker-build/actions/runs/30020636276) |
 
 ---
 
-## 戦略ごとの内訳と分析
+## 結果
 
-### 1. copy-build
+### A. main ブランチ（変更なし, 6回）
 
-**仕組み**: Go バイナリを GitHub Actions ランナーのホスト上で直接ビルド → 最小の Dockerfile（COPY のみ）でイメージ化
+| 戦略 | cold | Run2 | Run3 | Run4 | Run5 | Run6 | warm 平均 |
+|---|---|---|---|---|---|---|---|
+| **multistage-build-cache** 🥇 | 102s | 72s | 74s | **17s** | **23s** | **18s** | **19.3s** |
+| **copy-build** 🥈 | 55s | 65s | 56s | 32s | **19s** | 31s | 27.3s |
+| cache-dance 🥉 | 137s | 110s | 101s | 50s | 30s | 35s | **38.3s** |
+| multistage-build | 64s | 65s | 54s | 55s | 60s | 63s | **59.3s** |
 
+- **Run1-3** はキャッシュがない状態（cold）。Run4-6 はキャッシュが蓄積された状態（warm）
+- **cold** 列は Run1（初回）を示す
+- **warm 平均** はキャッシュが十分に効いた Run4-6 の平均
+- multistage-build はキャッシュ機構を持たず、常に 54-65s で安定
+
+### B. feature branch（main.go 変更, 3回）
+
+| 戦略 | api1 | api2 | api3 | 平均 |
+|---|---|---|---|---|
+| **copy-build** 🥇 | **35s** | **37s** | **27s** | **33.0s** |
+| multistage-build-cache 🥈 | 58s | 56s | 74s | 62.7s |
+| cache-dance 🥉 | 53s | 52s | 82s | 62.3s |
+| multistage-build | 67s | 58s | 60s | 61.7s |
+
+- ブランチが変わるため GHA cache（`type=gha`）は引き継がれない
+- `actions/cache` は default branch（main）のキャッシュに fallback するため、copy-build のみ恩恵を受けられる
+
+### C. go.mod 変更（3回）
+
+| 戦略 | mod1 | mod2 | mod3 | 平均 |
+|---|---|---|---|---|
+| **copy-build** 🥇 | **19s** | **24s** | **31s** | **24.7s** |
+| multistage-build 🥈 | 56s | 59s | 56s | 57.0s |
+| multistage-build-cache 🥉 | 79s | 74s | 77s | 76.7s |
+| cache-dance | 94s | 100s | 94s | 96.0s |
+
+- copy-build は `restore-keys: go-1.26.5-` で古いキャッシュに fallback HIT、Go build が 1-4s で完了
+
+---
+
+## 戦略別分析
+
+### copy-build（推奨）
+
+**仕組み**:
 ```
-go build on host (27-34s) → docker build with COPY (6-7s)
+go build on host (1-4s) → docker build (COPYのみ, 5-7s)
 ```
 
-**分析**:
-- `go build` 自体は `multistage-build` の Docker 内ビルドと同等の時間（25-34s）。CGO_ENABLED=0 かつ GOOS=linux GOARCH=amd64 のクロスコンパイル。
-- Docker ビルドは `docker/copy/Dockerfile`（FROM distroless + COPY server + ENTRYPOINT の3行）であり、レイヤーが1つしかないため SBOM 含めても 6-7s で完了。
-- `actions/cache` による Go のビルドキャッシュ保存が行われているが、**後続の Run ではキャッシュが見つからず都度フルビルド**している（後述）。
+**全条件でのパフォーマンス**: 19-55s（warm 状態では 19-37s）
 
 **なぜ速いか**:
-1. Docker ビルドが COPY のみで圧倒的に軽い（SBOM 含め 1-2s、残りは Buildx セットアップ）→ **Docker デーモンのオーバーヘッドが最小限**
-2. Go の依存解決・ビルドがホスト上のネイティブ環境で実行される
+1. Go ビルドをホスト上で行い、`actions/cache` でキャッシュ管理 → 差分ビルドのみ（1-4s）
+2. Docker は COPY のみの最小 Dockerfile → ビルド 5-7s。SBOM 含めても軽量
+3. `actions/cache` の `restore-keys` により default branch のキャッシュに fallback → feature branch でも恩恵
+4. GHA cache への export がない → オーバーヘッドゼロ
 
-**なぜ遅くなりうるか**:
-- Go ビルドキャッシュが効いていない（cache miss）ため、毎回フルビルド。本来キャッシュが効けば Go build は 5-10s まで短縮されるはず。
+**注意点**:
+- ホスト上で `CGO_ENABLED=0 GOOS=linux GOARCH=amd64` のクロスコンパイルが必要
+- Dockerfile が 3行とシンプルだが、ホスト上の Go ツールチェーンに依存
 
----
+### multistage-build-cache（main 最速）
 
-### 2. multistage-build（プレーンなマルチステージビルド）
-
-**仕組み**: Docker マルチステージビルド、キャッシュ機構は `--mount=type=cache` のみ
-
+**仕組み**:
 ```
-Dockerfile:
-  FROM golang:1.26.5 AS build
-    go mod download (--mount=type=cache)
-    go build      (--mount=type=cache)
-  FROM distroless
-    COPY --from=build /bin/server /bin/
+Docker build with GHA cache (全レイヤー CACHED + export 1-2s)
 ```
 
-**分析**:
-- Docker build 内部での `go build` ステップは **26.9s**（Run 2）／ **25.8s**（Run 3）。
-- `--mount=type=cache` により Go モジュールキャッシュとビルドキャッシュが BuildKit 内で保持されるが、**ジョブごとに新しいランナー + 新しい BuildKit コンテナ** なのでキャッシュは引き継がれない → 毎回フルビルド。
-- SBOM 生成が約 1s。
-- GHA cache へのエクスポートがないため、ビルド完了後すぐに終了する。
+**main での warm 平均**: 19s（最速）
 
-**なぜ速いか**:
-1. キャッシュエクスポート/インポートのオーバーヘッドがゼロ
-2. Dockerfile 自体がシンプルでレイヤー構造がフラット
-3. `--mount=type=cache` による BuildKit 内キャッシュは同一ジョブ内では有効
+**なぜ速い（main 限定）**:
+- Docker レイヤーが全 CACHED 状態になると、実質 GHA cache export の 1-2s のみ
+- `golang:1.26.5` ベースイメージもキャッシュされる
 
-**なぜ遅くなりうるか**:
-- `golang:1.26.5` ベースイメージのプル（Run 1 では 1.6s、Run 2/3 ではキャッシュ済みで 0.3s）
-- Docker のレイヤー構造と SBOM 生成による若干のオーバーヘッド
+**なぜ遅い（main 以外）**:
+- `cache-from: type=gha` はブランチスコープ → feature branch では完全な cold start（54-74s）
+- cold start は 102s と全戦略中最悪
+- `--mount=type=cache` を使用しているため、レイヤーキャッシュだけでは Go ビルド再実行を避けられない
 
----
+### multistage-build-cache-dance
 
-### 3. multistage-build-cache（GHA cache利用）
-
-**仕組み**: `multistage-build` に `cache-from/ cache-to: type=gha` を追加
+**仕組み**: 上記 + buildkit-cache-dance による `--mount=type=cache` の中身の永続化
 
 ```yaml
-cache-from: type=gha
-cache-to: type=gha,mode=max
+key: docker-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+restore-keys: |
+  docker-${{ steps.setup-go.outputs.go-version }}-
+  docker-
 ```
 
-**分析**:
+**平均**: main 38s / feature 62s / go.mod 変更 96s
 
-**Run 1 (cold) - 84s**:
-- GHA cache からのインポート（初回は cache miss だがチェックに時間）
-- ビルド（Go の依存解決 + ビルド）
-- **GHA cache へのエクスポートに 15-19s**
+**go.mod 変更時の実態（mod1）**:
 
-**Run 2/3 (warm) - 59-60s**:
-- GHA cache からのインポートが発生（キャッシュヒット）
-- ビルド時間そのものは `multistage-build` と同等（約 27s）
-- **GHA cache へのエクスポートに 15.1-15.8s** ← ボトルネック
+cache-dance の `docker-` キャッシュは `restore-keys` により main のキャッシュが HIT している。**キャッシュ自体は使われている。**
 
-**なぜ遅いか（ボトルネック詳細）**:
+```
+Cache hit for restore-key: docker-1.26.5-0bfbe49...  ← main のキャッシュに HIT
+Cache restored from key: docker-1.26.5-0bfbe49...   ← 復元成功
+```
 
-| フェーズ | 時間 | 備考 |
+しかし全体の所要時間は main warm の 30-50s に対し 94-100s と大幅に悪化する。内訳は以下の通り:
+
+```
+mod1 cache-dance 内訳:
+  ┌──────────────────────────────────────────────┐
+  │  actions/cache restore（docker- キャッシュ） 4s│ ← main のキャッシュ HIT
+  │  buildkit-cache-dance inject                 8s│
+  ├──────────────────────────────────────────────┤
+  │  Docker build                                 │
+  │    #16 WORKDIR /app           CACHED        │ ← ベースイメージはCACHED
+  │    #17 go mod download            3s         │ ← 新モジュールのみDL（差分）
+  │    #18 go build                   1s         │ ← 一部再コンパイル（差分）
+  │    #21 GHA cache export           8s         │ ← 新ブランチ＝cache MISS → 全量export
+  │    その他（context転送等）       ~25s         │
+  ├──────────────────────────────────────────────┤
+  │  buildkit-cache-dance extract    26s         │ ← キャッシュ更新あり → 全量抽出
+  │  actions/cache save               4s         │
+  ├──────────────────────────────────────────────┤
+  │  合計                            ~96s         │
+  └──────────────────────────────────────────────┘
+```
+
+**なぜ main warm より遅いか**:
+
+| 項目 | main (warm) | go.mod 変更 |
 |---|---|---|
-| ビルド本体（Go のコンパイルなど） | ~27s | multistage-build と同じ |
-| GHA cache エクスポート | **15-16s** | `exporting to GitHub Actions Cache` |
-| 前処理（メタデータロードなど） | ~5s | |
-| 後処理（SBOM, 証明書） | ~1s | |
+| GHA cache import | HIT（全レイヤー CACHED） | MISS（新ブランチのため） |
+| GHA cache export | 1s（index のみ） | **8s**（全レイヤーを新規保存） |
+| go mod download | 0s（CACHED） | **3s**（新モジュールあり） |
+| go build | 0s（CACHED） | **1s**（一部再コンパイル） |
+| cache-dance extract | 0s（skip-extraction） | **26s**（cache mount 更新あり → 全量抽出） |
 
-**GHA cache エクスポートの内訳**:
-- `mode=max` により全レイヤーを GHA cache に保存
-- マルチステージビルドの中間レイヤー（golang ベースイメージ層など）を圧縮・アップロード
-- 約 15s の純粋なネットワーク転送 + 圧縮時間
+**ボトルネックの本質**:
 
-**結論**: GHA cache のエクスポートがボトルネックであり、キャッシュヒットによるビルド時間短縮を上回るオーバーヘッドを生んでいる。
+cache-dance は cache mount に部分的な更新があると「更新あり」と判定しやすく、**その場合に全量抽出が発生する**。go.mod 変更により Go のモジュール/ビルドキャッシュが一部更新されると、そのトリガーで ~26s の抽出処理が走る。
+
+加えて GHA cache（`cache-from: type=gha`）がブランチスコープのため、新ブランチでは常に cache MISS となり 8s の export が発生する。この **cache-dance 抽出（26s）+ GHA cache export（8s）の二重オーバーヘッド** が、copy-build が 25s で終わる処理を 96s に引き延ばしている。
+
+**結論**: cache-dance の `docker-` キャッシュ自体は使用されているものの、その恩恵（go build の 1s）よりも、二重のキャッシュ保存コストの方が圧倒的に大きい。
+
+### multistage-build（ベースライン）
+
+**仕組み**: `--mount=type=cache` のみ。ジョブ跨ぎのキャッシュ永続化はなし
+
+**平均**: 59s（全条件で安定）
+
+毎回同じ 55-65s。Docker の `--mount=type=cache` が BuildKit のキャッシュを利用するが、毎回新しい BuildKit コンテナなので常にフルビルド。
 
 ---
 
-### 4. multistage-build-cache-dance（buildkit-cache-dance）
+## 総合成績
 
-**仕組み**: 上記に加え、`buildkit-cache-dance` で `--mount=type=cache` の中身も GHA cache で永続化
+| 順位 | 戦略 | main (warm) | feature branch | go.mod 変更 | 総合評価 |
+|---|---|---|---|---|---|
+| 🥇 | **copy-build** | 27s | **33s** | **25s** | **warm 時は 30秒以内** |
+| 🥈 | **multistage-build-cache** | **19s** | 62s | 77s | main 最速だが汎用性に欠ける |
+| 🥉 | cache-dance | 38s | 62s | 96s | 複雑な割に中途半端 |
+| 4 | multistage-build | 59s | 62s | 57s | 安定してるが改善余地なし |
+
+---
+
+## 推奨
+
+**実運用では `copy-build` 一択。**
+
+理由:
+1. warm 状態ではすべてのブランチ・変更パターンで安定的に 25-37s
+2. `actions/cache` の `restore-keys` が default branch に fallback するため、feature branch でも Go ビルドキャッシュが効く
+3. Docker build が COPY のみで単純。`cache-from/ cache-to: type=gha` は不要（レイヤーが1層のため）
+4. cold start も 55s と 4戦略中最速
+
+### 改善案
+
+現在の `copy-build` でも実用十分だが、以下の点を改善できる:
 
 ```yaml
-- uses: actions/cache@v6        # 事前にキャッシュマウントの内容を復元
-- uses: reproducible-containers/buildkit-cache-dance@v3  # キャッシュ注入
-- uses: docker/build-push-action@v7  # ビルド（cache-from/ cache-to: type=gha）
-  # ↑ さらに Post フェーズで cache-dance がキャッシュマウントを抽出・保存
-```
-
-**分析**:
-
-| フェーズ | 時間（Run 2） | 備考 |
-|---|---|---|
-| actions/cache 復元 | ~1s | ほぼ即時（ただし cache miss） |
-| buildkit-cache-dance inject | ~1s | |
-| Docker build（本体） | 26.4s | Go build |
-| GHA cache エクスポート | **19.0s** | `exporting to GitHub Actions Cache` |
-| buildkit-cache-dance extract | ~23s | Post フェーズでのキャッシュ抽出 |
-| actions/cache 保存 | ~4s | Post フェーズ |
-
-**なぜ最も遅いか**:
-1. Docker build の GHA cache エクスポート（19s） ← multistage-build-cache と同じ問題
-2. buildkit-cache-dance の **Post 抽出処理が約 23s** 追加
-   - BuildKit コンテナから `/go/pkg/mod/` と `/root/.cache/go-build` を抽出・圧縮
-3. さらに actions/cache への保存もあり（4s）
-
-**cache-dance 本来の目的**: `--mount=type=cache` の中身をジョブ間で永続化することで、2回目以降の Go ビルドを高速化する。しかし:
-- キャッシュ注入や抽出のオーバーヘッドが大きすぎる
-- 今回のワークロードでは Go モジュールの変更がないため、`--mount=type=cache` が本来もたらす恩恵が少ない
-- GHA cache export とも競合して二重にキャッシュ保存が発生
-
----
-
-## 根本原因の総括
-
-### なぜ GHA cache が逆効果なのか
-
-`multistage-build-cache` と `multistage-build-cache-dance` が素の `multistage-build` より遅い理由:
-
-```
-multistage-build-cache の実態:
-  ┌──────────────────────────────────────────┐
-  │  ビルド本体 (go build)          ~27s     │
-  │  GHA cache エクスポート         ~15s     │ ← 純粋なオーバーヘッド
-  │  SBOM/証明書                    ~1s      │
-  ├──────────────────────────────────────────┤
-  │  合計                          ~43s      │
-  └──────────────────────────────────────────┘
-  
-  素の multistage-build:
-  ┌──────────────────────────────────────────┐
-  │  ビルド本体 (go build)          ~27s     │ ← 同じ
-  │  SBOM/証明書                    ~1s      │
-  ├──────────────────────────────────────────┤
-  │  合計                          ~28s      │
-  └──────────────────────────────────────────┘
-```
-
-GHA cache (`type=gha`) は**ビルド結果の全レイヤー**をキャッシュする。しかし今回の Dockerfile の中間層は `--mount=type=cache` を使用しているため、レイヤーキャッシュだけでは Go のビルドキャッシュが保持されない。結果として:
-- **キャッシュがあっても Go ビルドは必ず再実行される**（毎回 27s）
-- その上で全レイヤーのエクスポート（15s）が走る
-
-つまり **GHA cache のコストだけが乗ってメリットがない**。
-
-### cache-dance が抱える二重のオーバーヘッド
-
-cache-dance は `--mount=type=cache` の中身を GHA の汎用 cache で保存するが、それに加えて GHA cache export も有効になっている（`cache-from/ cache-to: type=gha`）。以下の二重保存が発生:
-
-1. Docker build → GHA cache export（レイヤーキャッシュ）→ **15s**
-2. Post 処理 → cache-dance extract → actions/cache save（cache-mount の中身）→ **27s**
-
-```
-cache-dance のコスト内訳:
-  ┌──────────────────────────────────────────┐
-  │  Docker build (go build)        ~27s     │
-  │  GHA cache export (layers)     ~19s      │ ← 1つ目のオーバーヘッド
-  │  cache-dance extract           ~23s      │ ← 2つ目のオーバーヘッド
-  │  actions/cache save            ~4s       │
-  ├──────────────────────────────────────────┤
-  │  ビルド以外のオーバーヘッド合計 ~46s      │
-  └──────────────────────────────────────────┘
-```
-
-### copy-build で Go cache が効いていない問題（注意: 人為的削除による）
-
-`actions/cache` による Go のビルドキャッシュ保存は行われている（Run 1, 2 ともに保存ログあり）が、後続の Run で復元できていない:
-
-```
-Run 1:  Cache saved    → key: go-1.26.5-0bfbe...
-Run 2:  Cache NOT found ← 同じキーで検索
-Run 2:  Cache saved    → key: go-1.26.5-0bfbe...
-Run 3:  Cache NOT found ← 同じキーで検索
-```
-
-これは **検証目的で人為的にキャッシュが削除されていた** ためであり、GitHub Actions のキャッシュ機構に問題があるわけではない。
-
-そのため、**Go ビルドキャッシュが正しく永続化されるかは未検証の状態** である。現在の保存/復元の実装は `actions/cache/restore` と `actions/cache/save` を別々のステップに分けているが、これは既知のバグを踏む可能性がある。後述の修正で結合アクションに統一すれば Go ビルドキャッシュが次回以降にヒットし、`go build` が **5-10s まで短縮**、ジョブ合計は **~25-30s** まで削減できる見込み。
-
----
-
-## 結論と推奨
-
-### パフォーマンス順位
-
-| 順位 | 戦略 | 平均時間 | 評価 |
-|---|---|---|---|
-| 🥇 | copy-build | 58.7s | シンプルで安定、Docker レイヤーが最小 |
-| 🥇 | multistage-build | 61.0s | キャッシュ不要で手軽、同程度の速度 |
-| ❌ | multistage-build-cache | 82.7s | GHA cache export が逆効果 |
-| ❌ | multistage-build-cache-dance | 116.0s | 二重のオーバーヘッドで最遅 |
-
-**補足**: 上記の修正は `actions/cache/restore` + `actions/cache/save` の分割パターンが GitHub Actions のキャッシュ不変性（immutable keys）と相性が悪いという既知の問題への対策である。`actions/cache` の結合アクション（1つの step で restore と save を兼ねる）に変更することで、以下の問題を回避する:
-- save 時に同一キーが存在すると失敗する（がログには "Cache saved" と出る）
-- 別ステップだと `cache-primary-key` の出力が想定と異なる値になるケースがある
-
-### 推奨: ハイブリッド戦略
-
-このワークロードでは以下の点を考慮すると:
-
-- `--mount=type=cache` は同一 BuildKit 内でのみ有効。ジョブ跨ぎでは無意味。
-- GHA cache (`type=gha`) のレイヤーエクスポートは純粋なオーバーヘッド。
-- Docker Image の最終成果物は軽量 distroless + バイナリ1つ。
-
-**推奨パターン: `copy-build` の Go ビルドキャッシュ問題を解決する**
-
-```yaml
-- uses: actions/cache/restore@v6
-  id: cache
+- name: Cache Go modules and build cache
+  uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
   with:
     path: |
       ~/.cache/go-build
       ~/go/pkg/mod
-    key: go-cache-${{ hashFiles('go.mod') }}-${{ runner.os }}
+    key: go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+    restore-keys: |
+      go-${{ steps.setup-go.outputs.go-version }}-
 
 - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s" -trimpath -o server .
 
 - name: Build Docker image
-  uses: docker/build-push-action@v7
+  uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
   with:
     context: .
     file: docker/copy/Dockerfile
-    # cache-from/ cache-to: type=gha は不要（レイヤーが1つしかない）
-
-- uses: actions/cache/save@v6
-  if: steps.cache.outputs.cache-hit != 'true'
-  with:
-    path: |
-      ~/.cache/go-build
-      ~/go/pkg/mod
-    key: go-cache-${{ hashFiles('go.mod') }}-${{ runner.os }}
+    push: false
+    sbom: true
+    provenance: true
 ```
 
-**改善点**:
-1. Go ビルドキャッシュのキーを `runner.os` を含めてユニーク化し、キャッシュ競合を回避
-2. Docker build に `cache-from/ cache-to: type=gha` を指定しない（レイヤーが 1 層のみなので不要）
-3. `actions/cache` が復元できれば Go build が 5-10s に短縮 → ジョブ合計 **~25-30s** が期待値
+**変更点**:
+- `actions/cache/restore` + `save` の分割 → 1つの `actions/cache` に統合（シンプル化。シンプルなケースでは統合版が推奨される）
+
+---
+
+## 補足: キャッシュスコープの違い
+
+| キャッシュ種別 | コンポーネント | スコープ | feature branch での動作 |
+|---|---|---|---|
+| `actions/cache` | Go ビルド/モジュールキャッシュ | ブランチ（default branch fallback あり） | ✅ main のキャッシュを `restore-keys` で利用可能 |
+| `cache-from: type=gha` | Docker レイヤーキャッシュ | ブランチのみ（fallback なし） | ❌ 新ブランチでは完全に無効 |
+
+この差が feature branch でのパフォーマンスに直結している。
