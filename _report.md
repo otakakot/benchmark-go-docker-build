@@ -257,3 +257,5 @@ cache-dance は cache mount に部分的な更新があると「更新あり」�
 | `cache-from: type=gha` | Docker レイヤーキャッシュ | ブランチのみ（fallback なし） | ❌ 新ブランチでは完全に無効 |
 
 この差が feature branch でのパフォーマンスに直結している。
+
+この差が feature branch でのパフォーマンスに直結している。
