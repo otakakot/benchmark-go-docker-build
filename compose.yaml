@@ -33,7 +33,7 @@ services:
       context: .
       dockerfile: docker/multistage/Dockerfile
     ports:
-      - "8888:8080"
+      - "8181:8080"
     environment:
       - GIN_MODE=debug
     develop:
@@ -42,3 +42,10 @@ services:
           path: go.mod
         - action: rebuild
           path: main.go
+  ko:
+    container_name: ko
+    image: ko.local/ko
+    ports:
+      - "8282:8080"
+    environment:
+      - GIN_MODE=debug
