@@ -1,4 +1,19 @@
 services:
+  multistage:
+    container_name: multistage
+    build:
+      context: .
+      dockerfile: docker/multistage/Dockerfile
+    ports:
+      - "8181:8080"
+    environment:
+      - GIN_MODE=debug
+    develop:
+      watch:
+        - action: rebuild
+          path: go.mod
+        - action: rebuild
+          path: main.go
   copy:
     container_name: copy
     build:
@@ -27,25 +42,44 @@ services:
           path: go.sum
         - action: rebuild
           path: main.go
-  multistage:
-    container_name: multistage
+  ko:
+    container_name: ko
     build:
       context: .
-      dockerfile: docker/multistage/Dockerfile
+      dockerfile_inline: |
+        FROM ko.local/ko:latest
     ports:
-      - "8181:8080"
+      - "8282:8080"
     environment:
       - GIN_MODE=debug
     develop:
       watch:
         - action: rebuild
-          path: go.mod
-        - action: rebuild
-          path: main.go
-  ko:
-    container_name: ko
-    image: ko.local/ko
-    ports:
-      - "8282:8080"
+          path: ko.stamp
+  ko-build:
+    container_name: ko-build
+    image: ghcr.io/ko-build/ko:latest
+    working_dir: /app
     environment:
-      - GIN_MODE=debug
+      - KO_DOCKER_REPO=ko.local/ko
+    volumes:
+      - .:/app
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ko-mod-cache:/go/pkg/mod
+      - ko-build-cache:/root/.cache/go-build
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - ko build --bare --tags latest --platform linux/$$(go env GOARCH) . && touch ko.stamp
+    develop:
+      watch:
+        - action: restart
+          path: go.mod
+        - action: restart
+          path: go.sum
+        - action: restart
+          path: main.go
+volumes:
+  ko-mod-cache:
+  ko-build-cache:

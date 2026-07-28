@@ -8,3 +8,6 @@
 /vendor/
 
 server
+
+# ko (make ko / make ko-watch)
+ko.stamp
