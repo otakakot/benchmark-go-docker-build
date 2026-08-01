@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
-FROM golang:1.26.5 AS build
+FROM golang:1.26.5-alpine AS build
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod/,sharing=locked \
     --mount=type=bind,target=. \
     CGO_ENABLED=0 go build -ldflags="-s" -trimpath -o /bin/server .
 
-FROM gcr.io/distroless/static-debian13:latest@sha256:9197324ba51d9cd071af8505989365c006adf9d6d2067eada25aef00abbb5278
+FROM cgr.dev/chainguard/static:latest@sha256:399c8cb4858f05aaa33f43f02a2e75f28d40f016c0f86e5ba6075769e3303791
 
 COPY --from=build /bin/server /bin/
 

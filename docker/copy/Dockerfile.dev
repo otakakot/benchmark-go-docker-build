@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
-FROM golang:1.26.5
+FROM golang:1.26.5-alpine
 
 WORKDIR /app
 
